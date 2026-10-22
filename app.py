@@ -1,12 +1,12 @@
 import json
+import os
+import cv2
+import numpy as np
+import gradio as gr
 from keras.layers import Dense, InputLayer
 from keras.models import model_from_json as _original_model_from_json
 
-# ==========================================
-# KERAS COMPATIBILITY PATCH
-# Fixes version mismatch between training (newer Keras)
-# and deployment (older Keras).
-# ==========================================
+
 _original_dense_init = Dense.__init__
 def _patched_dense_init(self, *args, **kwargs):
     kwargs.pop('quantization_config', None)
@@ -23,33 +23,45 @@ InputLayer.__init__ = _patched_input_init
 
 def model_from_json(json_string, custom_objects=None):
     config = json.loads(json_string)
+    
     def clean_config(obj):
         if isinstance(obj, dict):
+            # Remove newer Keras parameters
             obj.pop('quantization_config', None)
             obj.pop('batch_shape', None)
             obj.pop('optional', None)
+
+            # Convert newer Keras dtype dictionary to string (e.g., {"class_name": "DTypePolicy", "config": {"name": "float32"}} -> "float32")
+            if 'dtype' in obj and isinstance(obj['dtype'], dict):
+                dtype_info = obj['dtype']
+                if 'config' in dtype_info and 'name' in dtype_info['config']:
+                    obj['dtype'] = dtype_info['config']['name']
+                elif 'name' in dtype_info:
+                    obj['dtype'] = dtype_info['name']
+                else:
+                    obj['dtype'] = 'float32'
+            
+            # Fix InputLayer batch_shape
             if 'class_name' in obj and obj['class_name'] == 'InputLayer' and 'config' in obj:
                 if 'batch_input_shape' not in obj['config'] and 'batch_shape' in obj['config']:
                     obj['config']['batch_input_shape'] = obj['config']['batch_shape']
+            
             for k, v in obj.items():
                 clean_config(v)
         elif isinstance(obj, list):
             for item in obj:
                 clean_config(item)
+                
     clean_config(config)
     return _original_model_from_json(json.dumps(config), custom_objects)
-# ==========================================
 
+# ==============================================================================
+# APPLICATION LOGIC
+# ==============================================================================
 
-import cv2
-import numpy as np
-import gradio as gr
-import os
-
-# Load the patched model
-json_file = open("emotiondetector.json", "r")
-model_json = json_file.read()
-json_file.close()
+# Load the model using the patched loader
+with open("emotiondetector.json", "r") as json_file:
+    model_json = json_file.read()
 model = model_from_json(model_json)
 model.load_weights("emotiondetector.h5")
 
@@ -58,12 +70,12 @@ face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
 
-# The order must exactly match how the model was trained
+# The label order must exactly match the order used during training
 labels = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 
 def predict_emotion(image):
     if image is None:
-        return None, "Please upload an image"
+        return None, "Please upload an image."
     
     # Convert RGB (from Gradio) to Grayscale (for model)
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)

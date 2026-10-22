@@ -1,4 +1,8 @@
-tensorflow-cpu
-opencv-python-headless==4.8.1.78
-numpy
-gradio
+tensorflow-cpu==2.15.0
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+gradio==4.44.1
+pydantic==2.10.6
+fastapi==0.115.0
+starlette==0.38.6
+huggingface-hub==0.26.2
